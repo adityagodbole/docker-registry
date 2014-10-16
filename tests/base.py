@@ -5,31 +5,69 @@ import os
 import random
 import string
 import unittest
+import httplib2
 
 from docker_registry.core import compat
 import docker_registry.wsgi as wsgi
 
 data_dir = os.path.join(os.path.dirname(__file__), "data")
 
+class DummyResp:
+    def __init__(self, headers, data):
+        self.headers = headers
+        self.status_code = headers.status
+        self.data = data
+
+class RealHttpClient:
+    def __init__(self, base_url):
+        self.conn = httplib2.Http()
+        self.baseurl = "http://" + base_url
+
+    def make_resp(self, r):
+        return DummyResp(r[0], r[1])
+
+    def full_url(self, url):
+        return self.baseurl + "/" + url
+
+    def prep_headers(self, headers):
+        if not headers.get('User-Agent'):
+            ua = ('docker/0.10.1 go/go1.2.1 git-commit/3600720 '
+                  'kernel/3.8.0-19-generic os/linux arch/amd64')
+            headers['User-Agent'] = ua
+
+    def put(self, url, data = None, headers = {}, input_stream = None):
+        self.prep_headers(headers)
+        if input_stream:
+            data = input_stream.read()
+        return self.make_resp(self.conn.request(self.full_url(url), "PUT", data, headers))
+	
+    def get(self, url, headers = {}):
+        self.prep_headers(headers)
+        return self.make_resp(self.conn.request(self.full_url(url), "GET", None, headers))
+
+    def delete(self, url, headers = {}):
+        self.prep_headers(headers)
+        return self.make_resp(self.conn.request(self.full_url(url), "DELETE", None, headers))
 
 class TestCase(unittest.TestCase):
 
     def __init__(self, *args, **kwargs):
         unittest.TestCase.__init__(self, *args, **kwargs)
         wsgi.app.testing = True
-        self.http_client = wsgi.app.test_client()
+        #self.http_client = wsgi.app.test_client()
+        self.http_client = RealHttpClient("localhost:5000")
         # Override the method so we can set headers for every single call
-        orig_open = self.http_client.open
-
-        def _open(*args, **kwargs):
-            if 'headers' not in kwargs:
-                kwargs['headers'] = {}
-            if 'User-Agent' not in kwargs['headers']:
-                ua = ('docker/0.10.1 go/go1.2.1 git-commit/3600720 '
-                      'kernel/3.8.0-19-generic os/linux arch/amd64')
-                kwargs['headers']['User-Agent'] = ua
-            return orig_open(*args, **kwargs)
-        self.http_client.open = _open
+#        orig_open = self.http_client.open
+#
+#        def _open(*args, **kwargs):
+#            if 'headers' not in kwargs:
+#                kwargs['headers'] = {}
+#            if 'User-Agent' not in kwargs['headers']:
+#                ua = ('docker/0.10.1 go/go1.2.1 git-commit/3600720 '
+#                      'kernel/3.8.0-19-generic os/linux arch/amd64')
+#                kwargs['headers']['User-Agent'] = ua
+#            return orig_open(*args, **kwargs)
+#        self.http_client.open = _open
 
     def gen_random_string(self, length=16):
         return ''.join([random.choice(string.ascii_uppercase + string.digits)
@@ -76,5 +114,5 @@ class TestCase(unittest.TestCase):
         resp = self.http_client.get('/v1/images/{0}/json'.format(image_id))
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.headers.get('x-docker-size'), str(len(layer)))
-        self.assertEqual(resp.headers['x-docker-checksum-payload'],
-                         layer_checksum)
+        chksum = resp.headers.get('x-docker-checksum-payload', resp.headers['x-docker-payload-checksum'])
+        self.assertEqual(chksum, layer_checksum)
