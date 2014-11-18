@@ -7,6 +7,7 @@ import string
 import unittest
 import httplib2
 import re
+import json
 
 from docker_registry.core import compat
 import docker_registry.wsgi as wsgi
@@ -23,7 +24,7 @@ class RealHttpClient:
     def __init__(self, base_url):
         self.conn = httplib2.Http()
         self.baseurl = "http://" + base_url
-        self.ua = ('docker/1.0.0 go/go1.2.1 git-commit/3600720 '
+        self.ua = ('docker/0.10.0 go/go1.2.1 git-commit/3600720 '
                   'kernel/3.8.0-19-generic os/linux arch/amd64')
 
     def make_resp(self, r):
@@ -56,8 +57,7 @@ class TestCase(unittest.TestCase):
         unittest.TestCase.__init__(self, *args, **kwargs)
         wsgi.app.testing = True
         #self.http_client = wsgi.app.test_client()
-        self.http_client = RealHttpClient("localhost:8080")
-        # self.http_client = RealHttpClient("localhost:5000")
+        self.http_client = RealHttpClient("localhost:5000")
         # Override the method so we can set headers for every single call
         # orig_open = self.http_client.open
 
@@ -136,13 +136,11 @@ class TestCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.headers.get('x-docker-size'), str(len(layer)))
 
-        # un comment below for docker version < 0.10
         # check only layer checksum
         if version_less_than_0_10:
             checksums = resp.headers['x-docker-checksum']
         else:
             checksums = resp.headers['x-docker-checksum-payload']
 
-        checksums = re.sub('\[|\]|"', "", checksums)
-        checksums = checksums.split(',')
+        checksums = json.loads(checksums)
         self.assertEqual(checksums[0], layer_checksum)
