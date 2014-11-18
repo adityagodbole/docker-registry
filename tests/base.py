@@ -142,5 +142,5 @@ class TestCase(unittest.TestCase):
         else:
             checksums = resp.headers['x-docker-checksum-payload']
 
-        checksums = json.loads(checksums)
+        checksums = checksums.split(', ')
         self.assertEqual(checksums[0], layer_checksum)
